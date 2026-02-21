@@ -39,6 +39,8 @@ INSTAGRAM_ACCESS_TOKEN=
 INSTAGRAM_PAGE_ID=
 INSTAGRAM_SEND_API_URL=
 
+# Для Postgres используй postgresql+asyncpg://...
+# Если провайдер дает postgres://, код сам конвертирует в asyncpg.
 DATABASE_URL=sqlite+aiosqlite:///./bitx.db
 API_BASE=http://127.0.0.1:8000
 

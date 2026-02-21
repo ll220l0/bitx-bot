@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Update
@@ -10,6 +12,7 @@ from core.config import settings
 from db.init import ensure_db_schema
 
 app = FastAPI(title="BitX API")
+logger = logging.getLogger(__name__)
 
 app.include_router(leads_router)
 app.include_router(meta_router)
@@ -43,7 +46,10 @@ async def health():
 
 @app.on_event("startup")
 async def startup_event():
-    await ensure_db_schema()
+    try:
+        await ensure_db_schema()
+    except Exception:
+        logger.exception("Failed to initialize DB schema on startup")
 
 
 @app.post("/telegram/webhook")
