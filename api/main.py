@@ -8,7 +8,9 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from api.leads import router as leads_router
 from api.meta import router as meta_router
+from bot.assistant_engine import SalesAssistant
 from bot.dispatcher import build_dispatcher
+from bot.lead_draft_store import has_active_lead_draft
 from core.config import settings
 from db.init import ensure_db_schema
 
@@ -20,6 +22,7 @@ app.include_router(meta_router)
 
 bot: Bot | None = None
 dp = build_dispatcher()
+webhook_assistant = SalesAssistant()
 
 
 def get_bot() -> Bot:
@@ -33,6 +36,33 @@ def get_bot() -> Bot:
         default=DefaultBotProperties(parse_mode="HTML"),
     )
     return bot
+
+
+def _extract_private_text_message(payload: dict) -> tuple[int, str] | None:
+    message = payload.get("message") or {}
+    chat = message.get("chat") or {}
+    from_user = message.get("from") or {}
+
+    if from_user.get("is_bot"):
+        return None
+    if chat.get("type") != "private":
+        return None
+
+    chat_id = chat.get("id")
+    if not isinstance(chat_id, int):
+        return None
+
+    text = (message.get("text") or message.get("caption") or "").strip()
+    if not text or text.startswith("/"):
+        return None
+    return chat_id, text
+
+
+def _safe_reply_text(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return "Могу помочь с консультацией. Опиши задачу в 1-2 предложениях."
+    return value[:3500]
 
 
 @app.get("/")
@@ -68,6 +98,17 @@ async def telegram_webhook(
     try:
         tg_bot = get_bot()
         payload = await request.json()
+
+        # Reliable fallback for plain private messages in webhook mode.
+        extracted = _extract_private_text_message(payload)
+        if settings.ASSISTANT_ENABLED and extracted is not None:
+            chat_id, text = extracted
+            if not await has_active_lead_draft(chat_id):
+                result = await webhook_assistant.reply(chat_id=chat_id, user_text=text)
+                await tg_bot.send_message(chat_id, _safe_reply_text(result.reply), parse_mode=None)
+                logger.warning("Telegram direct assistant reply: chat_id=%s", chat_id)
+                return {"ok": True}
+
         update = Update.model_validate(payload, context={"bot": tg_bot})
         logger.warning(
             "Telegram update received: update_id=%s event_type=%s",
