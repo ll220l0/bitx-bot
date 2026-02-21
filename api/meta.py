@@ -5,6 +5,7 @@ import httpx
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 
 from bot.assistant_engine import SalesAssistant
 from core.config import settings
@@ -19,7 +20,7 @@ def _verify_webhook_token(mode: str | None, token: str | None, challenge: str | 
         raise HTTPException(status_code=400, detail="Invalid hub.mode")
     if not settings.WEBHOOK_SECRET_TOKEN:
         raise HTTPException(status_code=500, detail="WEBHOOK_SECRET_TOKEN is not configured")
-    if token != settings.WEBHOOK_SECRET_TOKEN:
+    if (token or "").strip() != settings.WEBHOOK_SECRET_TOKEN.strip():
         raise HTTPException(status_code=403, detail="Invalid verify token")
     return challenge or ""
 
@@ -149,7 +150,7 @@ async def _assistant_reply(channel: str, external_user_id: str, user_text: str) 
     return result.reply
 
 
-@router.get("/whatsapp")
+@router.get("/whatsapp", response_class=PlainTextResponse)
 async def verify_whatsapp(
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
@@ -158,7 +159,7 @@ async def verify_whatsapp(
     return _verify_webhook_token(hub_mode, hub_verify_token, hub_challenge)
 
 
-@router.get("/instagram")
+@router.get("/instagram", response_class=PlainTextResponse)
 async def verify_instagram(
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
