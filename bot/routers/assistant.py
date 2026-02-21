@@ -76,3 +76,18 @@ async def handle_message(message: Message) -> None:
 @router.business_message()
 async def handle_business_message(message: Message) -> None:
     await _handle_message(message)
+
+
+@router.edited_message()
+async def handle_edited_message(message: Message) -> None:
+    await _handle_message(message)
+
+
+@router.edited_business_message()
+async def handle_edited_business_message(message: Message) -> None:
+    await _handle_message(message)
+
+
+@router.channel_post()
+async def handle_channel_post(message: Message) -> None:
+    await _handle_message(message)

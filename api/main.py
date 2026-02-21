@@ -69,9 +69,14 @@ async def telegram_webhook(
         tg_bot = get_bot()
         payload = await request.json()
         update = Update.model_validate(payload, context={"bot": tg_bot})
+        logger.warning(
+            "Telegram update received: update_id=%s event_type=%s",
+            update.update_id,
+            update.event_type,
+        )
         result = await dp.feed_update(tg_bot, update)
         if result is UNHANDLED:
-            logger.info(
+            logger.warning(
                 "Telegram update unhandled: update_id=%s event_type=%s",
                 update.update_id,
                 update.event_type,
