@@ -75,6 +75,13 @@ async def telegram_webhook(
             update.event_type,
         )
         result = await dp.feed_update(tg_bot, update)
+        logger.warning(
+            "Telegram update result: update_id=%s event_type=%s result_type=%s result_repr=%r",
+            update.update_id,
+            update.event_type,
+            type(result).__name__,
+            result,
+        )
         if result is UNHANDLED:
             logger.warning(
                 "Telegram update unhandled: update_id=%s event_type=%s",
