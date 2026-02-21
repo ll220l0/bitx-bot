@@ -1,6 +1,5 @@
 from aiogram import F, Router
-from aiogram.dispatcher.event.bases import SkipHandler
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.types import Message
 
 from api.client import send_lead_to_api
@@ -14,6 +13,11 @@ from bot.lead_draft_store import (
 from bot.validators import validate_budget, validate_company, validate_details, validate_name
 
 router = Router()
+
+
+class ActiveLeadDraftFilter(Filter):
+    async def __call__(self, message: Message) -> bool:
+        return await has_active_lead_draft(message.chat.id)
 
 
 def _service_normalize(text: str) -> str:
@@ -48,15 +52,15 @@ async def lead_cancel(message: Message) -> None:
     await message.answer("Ок, заявку отменил. Если захотите снова - команда /lead")
 
 
-@router.message(F.chat.type == "private")
+@router.message(F.chat.type == "private", ActiveLeadDraftFilter())
 async def lead_progress(message: Message) -> None:
     text = (message.text or "").strip()
     if text.startswith("/"):
-        raise SkipHandler()
+        return
 
     draft = await get_lead_draft(message.chat.id)
     if draft is None:
-        raise SkipHandler()
+        return
 
     if draft.step == "name":
         ok, val = validate_name(text)
