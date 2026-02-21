@@ -114,6 +114,10 @@ async def _send_instagram_text(recipient_id: str, text: str) -> None:
 
 
 async def _notify_managers(channel: str, external_user_id: str, user_text: str, reason: str) -> None:
+    chat_ids = settings.notification_chat_ids()
+    if not settings.BOT_TOKEN or not chat_ids:
+        return
+
     bot = Bot(settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     text = (
         "⚠️ <b>Эскалация менеджеру</b>\n"
@@ -123,7 +127,7 @@ async def _notify_managers(channel: str, external_user_id: str, user_text: str, 
         f"Сообщение: {user_text[:500]}"
     )
     try:
-        for chat_id in settings.notification_chat_ids():
+        for chat_id in chat_ids:
             try:
                 await bot.send_message(chat_id, text)
             except Exception:

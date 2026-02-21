@@ -45,6 +45,10 @@ async def run_polling() -> None:
     lock_port = int(os.getenv("BOT_LOCK_PORT", "47291"))
     lock_socket = acquire_instance_lock(lock_port)
 
+    if not settings.BOT_TOKEN:
+        lock_socket.close()
+        raise RuntimeError("BOT_TOKEN is not configured")
+
     bot = Bot(
         settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML"),

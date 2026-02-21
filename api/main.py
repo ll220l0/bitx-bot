@@ -13,11 +13,26 @@ app = FastAPI(title="BitX API")
 app.include_router(leads_router)
 app.include_router(meta_router)
 
-bot = Bot(
-    settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML"),
-)
+bot: Bot | None = None
 dp = build_dispatcher()
+
+
+def get_bot() -> Bot:
+    global bot
+    if bot is not None:
+        return bot
+    if not settings.BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured")
+    bot = Bot(
+        settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
+    return bot
+
+
+@app.get("/")
+async def root():
+    return {"status": "ok"}
 
 
 @app.get("/health")
@@ -36,9 +51,10 @@ async def telegram_webhook(
     if settings.WEBHOOK_SECRET_TOKEN and secret_token != settings.WEBHOOK_SECRET_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid secret token")
 
+    tg_bot = get_bot()
     payload = await request.json()
-    update = Update.model_validate(payload, context={"bot": bot})
-    await dp.feed_update(bot, update)
+    update = Update.model_validate(payload, context={"bot": tg_bot})
+    await dp.feed_update(tg_bot, update)
     return {"ok": True}
 
 
@@ -47,8 +63,9 @@ async def set_webhook():
     if not settings.PUBLIC_BASE_URL:
         raise HTTPException(status_code=400, detail="PUBLIC_BASE_URL is required")
 
+    tg_bot = get_bot()
     webhook_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.WEBHOOK_PATH}"
-    await bot.set_webhook(
+    await tg_bot.set_webhook(
         url=webhook_url,
         secret_token=settings.WEBHOOK_SECRET_TOKEN,
     )
@@ -57,10 +74,12 @@ async def set_webhook():
 
 @app.post("/telegram/delete-webhook")
 async def delete_webhook():
-    await bot.delete_webhook(drop_pending_updates=False)
+    tg_bot = get_bot()
+    await tg_bot.delete_webhook(drop_pending_updates=False)
     return {"ok": True}
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await bot.session.close()
+    if bot is not None:
+        await bot.session.close()

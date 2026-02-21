@@ -53,16 +53,18 @@ async def create_lead(data: LeadCreate) -> dict[str, int | str]:
         raise HTTPException(status_code=500, detail="Failed to save lead") from exc
 
     try:
-        bot = Bot(
-            settings.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode="HTML"),
-        )
-        for chat_id in settings.notification_chat_ids():
-            try:
-                await bot.send_message(chat_id, format_lead(lead))
-            except Exception:
-                logger.exception("Failed to notify chat_id=%s", chat_id)
-        await bot.session.close()
+        chat_ids = settings.notification_chat_ids()
+        if settings.BOT_TOKEN and chat_ids:
+            bot = Bot(
+                settings.BOT_TOKEN,
+                default=DefaultBotProperties(parse_mode="HTML"),
+            )
+            for chat_id in chat_ids:
+                try:
+                    await bot.send_message(chat_id, format_lead(lead))
+                except Exception:
+                    logger.exception("Failed to notify chat_id=%s", chat_id)
+            await bot.session.close()
     except Exception:
         # Лид уже сохранен, не ломаем ответ клиенту из-за проблем с уведомлением.
         logger.exception("Failed to send lead notification")

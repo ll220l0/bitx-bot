@@ -1,8 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    BOT_TOKEN: str
-    ADMIN_CHAT_ID: int
+    BOT_TOKEN: str | None = None
+    ADMIN_CHAT_ID: int | None = None
     MANAGER_CHAT_IDS: str | None = None
     BOT_MODE: str = "polling"
     FSM_STORAGE: str = "memory"
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     INSTAGRAM_ACCESS_TOKEN: str | None = None
     INSTAGRAM_PAGE_ID: str | None = None
     INSTAGRAM_SEND_API_URL: str | None = None
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite+aiosqlite:///./bitx.db"
     REDIS_URL: str | None = None
     API_BASE: str = "http://127.0.0.1:8000"
     ASSISTANT_ENABLED: bool = True
@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def notification_chat_ids(self) -> list[int]:
-        ids: list[int] = [self.ADMIN_CHAT_ID]
+        ids: list[int] = []
+        if self.ADMIN_CHAT_ID is not None:
+            ids.append(self.ADMIN_CHAT_ID)
         raw = (self.MANAGER_CHAT_IDS or "").strip()
         if not raw:
             return ids
