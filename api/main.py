@@ -60,13 +60,17 @@ async def telegram_webhook(
     if settings.BOT_MODE != "webhook":
         raise HTTPException(status_code=409, detail="Bot is not configured in webhook mode")
 
-    if settings.WEBHOOK_SECRET_TOKEN and secret_token != settings.WEBHOOK_SECRET_TOKEN:
+    expected_secret = (settings.WEBHOOK_SECRET_TOKEN or "").strip()
+    if expected_secret and (secret_token or "").strip() != expected_secret:
         raise HTTPException(status_code=403, detail="Invalid secret token")
 
-    tg_bot = get_bot()
-    payload = await request.json()
-    update = Update.model_validate(payload, context={"bot": tg_bot})
-    await dp.feed_update(tg_bot, update)
+    try:
+        tg_bot = get_bot()
+        payload = await request.json()
+        update = Update.model_validate(payload, context={"bot": tg_bot})
+        await dp.feed_update(tg_bot, update)
+    except Exception:
+        logger.exception("Failed to process telegram webhook update")
     return {"ok": True}
 
 
