@@ -7,6 +7,7 @@ from api.leads import router as leads_router
 from api.meta import router as meta_router
 from bot.dispatcher import build_dispatcher
 from core.config import settings
+from db.init import ensure_db_schema
 
 app = FastAPI(title="BitX API")
 
@@ -38,6 +39,11 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "bot_mode": settings.BOT_MODE}
+
+
+@app.on_event("startup")
+async def startup_event():
+    await ensure_db_schema()
 
 
 @app.post("/telegram/webhook")

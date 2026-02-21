@@ -29,7 +29,6 @@ MANAGER_CHAT_IDS=123456789,987654321
 
 # polling | webhook
 BOT_MODE=polling
-FSM_STORAGE=memory
 WEBHOOK_PATH=/telegram/webhook
 WEBHOOK_SECRET_TOKEN=
 PUBLIC_BASE_URL=
@@ -41,7 +40,6 @@ INSTAGRAM_PAGE_ID=
 INSTAGRAM_SEND_API_URL=
 
 DATABASE_URL=sqlite+aiosqlite:///./bitx.db
-REDIS_URL=redis://127.0.0.1:6379/0
 API_BASE=http://127.0.0.1:8000
 
 ASSISTANT_ENABLED=true
@@ -94,16 +92,12 @@ API:
 
 2. Задеплойте проект (`vercel --prod`).
 
-3. Для serverless обязательно вынесите FSM в Redis:
-- `FSM_STORAGE=redis`
-- `REDIS_URL=<external-redis-url>`
-
-4. После деплоя установите webhook:
+3. После деплоя установите webhook:
 ```bash
 curl -X POST https://<your-project>.vercel.app/telegram/set-webhook
 ```
 
-5. Проверка:
+4. Проверка:
 - `GET /health`
 - Telegram должен слать обновления на `/telegram/webhook`.
 
@@ -130,3 +124,4 @@ curl -X POST https://<your-project>.vercel.app/telegram/set-webhook
 - `/leads` — последние 10 лидов (доступно `ADMIN_CHAT_ID` и `MANAGER_CHAT_IDS`).
 - При эскалации и новых лидах бот отправляет уведомления в `ADMIN_CHAT_ID` и `MANAGER_CHAT_IDS`.
 - Клиентский поток: свободный диалог + `/lead` для формы заявки.
+- Шаги `/lead` хранятся в БД (`lead_drafts`), Redis не нужен.

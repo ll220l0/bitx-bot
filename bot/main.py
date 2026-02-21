@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramConflictError
 
 from bot.dispatcher import build_dispatcher
 from core.config import settings
+from db.init import ensure_db_schema
 
 
 def acquire_instance_lock(port: int) -> socket.socket:
@@ -54,6 +55,7 @@ async def run_polling() -> None:
         default=DefaultBotProperties(parse_mode="HTML"),
     )
 
+    await ensure_db_schema()
     dp: Dispatcher = build_dispatcher()
 
     try:

@@ -5,7 +5,6 @@ class Settings(BaseSettings):
     ADMIN_CHAT_ID: int | None = None
     MANAGER_CHAT_IDS: str | None = None
     BOT_MODE: str = "polling"
-    FSM_STORAGE: str = "memory"
     WEBHOOK_PATH: str = "/telegram/webhook"
     WEBHOOK_SECRET_TOKEN: str | None = None
     PUBLIC_BASE_URL: str | None = None
@@ -16,7 +15,6 @@ class Settings(BaseSettings):
     INSTAGRAM_PAGE_ID: str | None = None
     INSTAGRAM_SEND_API_URL: str | None = None
     DATABASE_URL: str = "sqlite+aiosqlite:///./bitx.db"
-    REDIS_URL: str | None = None
     API_BASE: str = "http://127.0.0.1:8000"
     ASSISTANT_ENABLED: bool = True
     OPENAI_API_KEY: str | None = None

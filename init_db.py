@@ -1,10 +1,10 @@
 import asyncio
-from db.models import Base
+
+from db.init import ensure_db_schema
 from db.session import engine
 
 async def init():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await ensure_db_schema()
     await engine.dispose()
 
 asyncio.run(init()) 

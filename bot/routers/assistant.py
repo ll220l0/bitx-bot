@@ -1,10 +1,10 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.assistant_engine import SalesAssistant
+from bot.lead_draft_store import has_active_lead_draft
 from core.config import settings
 
 router = Router()
@@ -40,12 +40,12 @@ async def _notify_managers(message: Message, reason: str) -> None:
         logger.exception("Failed to notify managers about escalation")
 
 
-async def _handle_message(message: Message, state: FSMContext) -> None:
+async def _handle_message(message: Message) -> None:
     if not settings.ASSISTANT_ENABLED:
         return
     if message.from_user and message.from_user.is_bot:
         return
-    if await state.get_state() is not None:
+    if await has_active_lead_draft(message.chat.id):
         return
 
     text = _extract_text(message)
@@ -59,10 +59,10 @@ async def _handle_message(message: Message, state: FSMContext) -> None:
 
 
 @router.message(F.chat.type == "private")
-async def handle_private_message(message: Message, state: FSMContext) -> None:
-    await _handle_message(message, state)
+async def handle_private_message(message: Message) -> None:
+    await _handle_message(message)
 
 
 @router.business_message()
-async def handle_business_message(message: Message, state: FSMContext) -> None:
-    await _handle_message(message, state)
+async def handle_business_message(message: Message) -> None:
+    await _handle_message(message)
