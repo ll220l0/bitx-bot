@@ -1,6 +1,6 @@
 import logging
 
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.types import Message
 
 from bot.assistant_engine import SalesAssistant
@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 def _extract_text(message: Message) -> str:
     return (message.text or message.caption or "").strip()
+
+
+def _chat_type(message: Message) -> str:
+    chat = getattr(message, "chat", None)
+    return getattr(chat, "type", "") or ""
 
 
 async def _notify_managers(message: Message, reason: str) -> None:
@@ -45,21 +50,26 @@ async def _handle_message(message: Message) -> None:
         return
     if message.from_user and message.from_user.is_bot:
         return
-    if await has_active_lead_draft(message.chat.id):
+    chat = getattr(message, "chat", None)
+    if not chat:
+        return
+    if _chat_type(message) in {"group", "supergroup", "channel"}:
+        return
+    if await has_active_lead_draft(chat.id):
         return
 
     text = _extract_text(message)
     if not text or text.startswith("/"):
         return
 
-    result = await assistant.reply(chat_id=message.chat.id, user_text=text)
+    result = await assistant.reply(chat_id=chat.id, user_text=text)
     await message.answer(result.reply)
     if result.escalate:
         await _notify_managers(message, reason=result.reason)
 
 
-@router.message(F.chat.type == "private")
-async def handle_private_message(message: Message) -> None:
+@router.message()
+async def handle_message(message: Message) -> None:
     await _handle_message(message)
 
 

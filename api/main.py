@@ -2,6 +2,7 @@ import logging
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
+from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.types import Update
 from fastapi import FastAPI, Header, HTTPException, Request
 
@@ -68,7 +69,13 @@ async def telegram_webhook(
         tg_bot = get_bot()
         payload = await request.json()
         update = Update.model_validate(payload, context={"bot": tg_bot})
-        await dp.feed_update(tg_bot, update)
+        result = await dp.feed_update(tg_bot, update)
+        if result is UNHANDLED:
+            logger.info(
+                "Telegram update unhandled: update_id=%s event_type=%s",
+                update.update_id,
+                update.event_type,
+            )
     except Exception:
         logger.exception("Failed to process telegram webhook update")
     return {"ok": True}
