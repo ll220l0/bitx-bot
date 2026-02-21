@@ -59,23 +59,42 @@ async def _notify_managers(message: Message, reason: str) -> None:
 
 async def _handle_message(message: Message) -> None:
     if not settings.ASSISTANT_ENABLED:
+        logger.warning("Assistant skip: disabled")
         return
     if message.from_user and message.from_user.is_bot:
+        logger.warning("Assistant skip: from_bot chat_id=%s", getattr(message.chat, "id", None))
         return
     chat = getattr(message, "chat", None)
     if not chat:
+        logger.warning("Assistant skip: no_chat")
         return
-    if _chat_type(message) in {"group", "supergroup", "channel"}:
+    chat_type = _chat_type(message)
+    if chat_type in {"group", "supergroup", "channel"}:
+        logger.warning("Assistant skip: chat_type=%s chat_id=%s", chat_type, chat.id)
         return
     if await has_active_lead_draft(chat.id):
+        logger.warning("Assistant skip: active_lead_draft chat_id=%s", chat.id)
         return
 
     text = _extract_text(message)
     if not text or text.startswith("/"):
+        logger.warning(
+            "Assistant skip: empty_or_command chat_id=%s chat_type=%s has_text=%s",
+            chat.id,
+            chat_type,
+            bool(text),
+        )
         return
 
+    logger.warning(
+        "Assistant process: chat_id=%s chat_type=%s text_len=%s",
+        chat.id,
+        chat_type,
+        len(text),
+    )
     result = await assistant.reply(chat_id=chat.id, user_text=text)
     await _reply_user(message, result.reply)
+    logger.warning("Assistant replied: chat_id=%s reply_len=%s", chat.id, len(result.reply or ""))
     if result.escalate:
         await _notify_managers(message, reason=result.reason)
 
