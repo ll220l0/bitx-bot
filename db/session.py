@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from core.config import settings
 
@@ -13,7 +14,23 @@ def _normalize_database_url(raw_url: str) -> str:
     return raw_url
 
 
-database_url = _normalize_database_url(settings.DATABASE_URL)
+def _normalize_asyncpg_query(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    normalized: list[tuple[str, str]] = []
+    for key, value in query_items:
+        if key == "sslmode":
+            normalized.append(("ssl", value))
+        else:
+            normalized.append((key, value))
+
+    return urlunparse(parsed._replace(query=urlencode(normalized)))
+
+
+database_url = _normalize_asyncpg_query(_normalize_database_url(settings.DATABASE_URL))
 
 engine_kwargs = {"echo": False}
 if database_url.startswith("sqlite+aiosqlite://"):
