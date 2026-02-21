@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -51,11 +52,11 @@ async def lead_cancel(message: Message) -> None:
 async def lead_progress(message: Message) -> None:
     text = (message.text or "").strip()
     if text.startswith("/"):
-        return
+        raise SkipHandler()
 
     draft = await get_lead_draft(message.chat.id)
     if draft is None:
-        return
+        raise SkipHandler()
 
     if draft.step == "name":
         ok, val = validate_name(text)
