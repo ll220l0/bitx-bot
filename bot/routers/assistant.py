@@ -21,6 +21,18 @@ def _chat_type(message: Message) -> str:
     return getattr(chat, "type", "") or ""
 
 
+def _safe_reply_text(text: str) -> str:
+    clean = (text or "").strip()
+    if not clean:
+        return "Могу помочь с консультацией. Опиши задачу в 1-2 предложениях."
+    return clean[:3500]
+
+
+async def _reply_user(message: Message, text: str) -> None:
+    # Force plain text to avoid Telegram HTML parse errors from model output.
+    await message.answer(_safe_reply_text(text), parse_mode=None)
+
+
 async def _notify_managers(message: Message, reason: str) -> None:
     target_chat_ids = settings.notification_chat_ids()
     if message.chat.id in target_chat_ids:
@@ -63,31 +75,46 @@ async def _handle_message(message: Message) -> None:
         return
 
     result = await assistant.reply(chat_id=chat.id, user_text=text)
-    await message.answer(result.reply)
+    await _reply_user(message, result.reply)
     if result.escalate:
         await _notify_managers(message, reason=result.reason)
 
 
 @router.message()
 async def handle_message(message: Message) -> None:
-    await _handle_message(message)
+    try:
+        await _handle_message(message)
+    except Exception:
+        logger.exception("Assistant handler failed for chat_id=%s", getattr(message.chat, "id", None))
 
 
 @router.business_message()
 async def handle_business_message(message: Message) -> None:
-    await _handle_message(message)
+    try:
+        await _handle_message(message)
+    except Exception:
+        logger.exception("Assistant business handler failed for chat_id=%s", getattr(message.chat, "id", None))
 
 
 @router.edited_message()
 async def handle_edited_message(message: Message) -> None:
-    await _handle_message(message)
+    try:
+        await _handle_message(message)
+    except Exception:
+        logger.exception("Assistant edited handler failed for chat_id=%s", getattr(message.chat, "id", None))
 
 
 @router.edited_business_message()
 async def handle_edited_business_message(message: Message) -> None:
-    await _handle_message(message)
+    try:
+        await _handle_message(message)
+    except Exception:
+        logger.exception("Assistant edited business handler failed for chat_id=%s", getattr(message.chat, "id", None))
 
 
 @router.channel_post()
 async def handle_channel_post(message: Message) -> None:
-    await _handle_message(message)
+    try:
+        await _handle_message(message)
+    except Exception:
+        logger.exception("Assistant channel handler failed for chat_id=%s", getattr(message.chat, "id", None))
