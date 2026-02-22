@@ -352,11 +352,21 @@ def _is_profile_ready(profile: LeadProfile) -> bool:
     if tags:
         context_score += 1
 
-    if context_score < max(settings.AUTO_LEAD_MIN_CONTEXT_SCORE, 3):
-        return False
-
+    min_score = max(settings.AUTO_LEAD_MIN_CONTEXT_SCORE, 3)
     missing = _detect_missing_fields(profile)
-    if "company" in missing and "budget" in missing and "timeline" in missing:
+    hard_gap = "company" in missing and "budget" in missing and "timeline" in missing
+
+    if context_score < min_score:
+        # Soft fallback: once the dialogue is meaningful, do not block handoff forever.
+        has_soft_context = bool(
+            len(items) >= 1
+            and (profile.budget or timeline or details_len >= 45)
+        )
+        if not (turns >= 4 and has_soft_context):
+            return False
+
+    # If all commercial anchors are missing, allow handoff only after a longer dialogue.
+    if hard_gap and turns < 8:
         return False
     return True
 
@@ -559,6 +569,12 @@ async def process_lead_capture(
         follow_up_question = _build_follow_up_question(follow_up_field)
 
         if not _is_profile_ready(profile):
+            logger.info(
+                "Lead profile not ready yet: chat_id=%s turns=%s missing=%s",
+                chat_id,
+                int(profile.message_count or 0),
+                ",".join(missing_fields) if missing_fields else "-",
+            )
             await session.commit()
             return LeadCaptureResult(
                 sent=False,
