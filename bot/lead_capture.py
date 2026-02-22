@@ -47,14 +47,15 @@ REQUIREMENT_TAGS: dict[str, tuple[str, ...]] = {
 }
 
 QUESTION_BY_FIELD: dict[str, str] = {
-    "name": "Чтобы оформить заявку, подскажите ваше имя.",
-    "company": "Уточните, пожалуйста, компанию или нишу проекта.",
-    "service": "Какая услуга вам нужна в первую очередь (сайт, бот, CRM, автоматизация и т.д.)?",
-    "timeline": "Какие желаемые сроки запуска проекта?",
-    "budget": "Какой ориентир по бюджету вы рассматриваете?",
+    "name": "Если удобно, подскажите ваше имя.",
+    "company": "Если удобно, уточните компанию или нишу проекта.",
+    "service": "Если удобно, напишите, какая услуга в приоритете (сайт, бот, CRM, автоматизация).",
+    "timeline": "Если уже понимаете сроки, подскажите желаемую дату запуска.",
+    "budget": "Если есть ориентир, подскажите примерный бюджет.",
     "contact": "Оставьте удобный контакт для связи (телефон, @username или email).",
-    "details": "Опишите ключевые требования: что обязательно должно быть в результате?",
+    "details": "Если удобно, добавьте ключевые требования к результату.",
 }
+FOLLOW_UP_PRIORITY: tuple[str, ...] = ("name", "service", "contact", "company", "timeline", "budget", "details")
 
 
 @dataclass(slots=True)
@@ -218,10 +219,27 @@ def _detect_missing_fields(profile: LeadProfile) -> list[str]:
 def _build_follow_up_question(missing_fields: list[str]) -> str | None:
     if not missing_fields:
         return None
-    for key in ("name", "company", "service", "timeline", "budget", "contact", "details"):
+    for key in FOLLOW_UP_PRIORITY:
         if key in missing_fields:
             return QUESTION_BY_FIELD.get(key)
     return QUESTION_BY_FIELD.get(missing_fields[0])
+
+
+def _should_ask_follow_up(profile: LeadProfile, missing_fields: list[str]) -> bool:
+    if not missing_fields:
+        return False
+
+    # Ask gradually, not after every user message.
+    if int(profile.message_count or 0) < 2:
+        return False
+    if int(profile.message_count or 0) % 2 != 0:
+        return False
+
+    # If only details are missing, ask later to avoid pressure.
+    if missing_fields == ["details"] and int(profile.message_count or 0) < 6:
+        return False
+
+    return True
 
 
 def _is_profile_ready(profile: LeadProfile) -> bool:
@@ -383,7 +401,11 @@ async def process_lead_capture(
                 profile.contact = _extract_contact(text, username)
 
         missing_fields = _detect_missing_fields(profile)
-        follow_up_question = _build_follow_up_question(missing_fields)
+        follow_up_question = (
+            _build_follow_up_question(missing_fields)
+            if _should_ask_follow_up(profile, missing_fields)
+            else None
+        )
 
         if not _is_profile_ready(profile):
             await session.commit()
