@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -6,6 +6,7 @@ from typing import Deque
 
 import httpx
 
+from bot.assistant_config_store import get_custom_prompt
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -59,8 +60,7 @@ class SalesAssistant:
             lambda: deque(maxlen=max(settings.ASSISTANT_HISTORY_MESSAGES, 2))
         )
 
-    @property
-    def _system_prompt(self) -> str:
+    def _base_system_prompt(self) -> str:
         return (
             "Ты ассистент продаж компании BitX. Отвечай на русском, коротко и по делу. "
             "Твоя задача: консультировать, выявлять задачу, доводить до заявки.\n"
@@ -72,6 +72,13 @@ class SalesAssistant:
             "5) Всегда сохраняй вежливый и уверенный тон.\n"
             "Контакты: Telegram @bitx_kg, Instagram @bitx_kg, Email bitxkg@gmail.com."
         )
+
+    async def _build_system_prompt(self) -> str:
+        base = self._base_system_prompt()
+        custom = await get_custom_prompt()
+        if not custom:
+            return base
+        return f"{base}\n\nДополнительный сценарий от администратора:\n{custom}"
 
     def _enforce_discount_rule(self, text: str) -> AssistantResult | None:
         lowered = text.lower()
@@ -118,11 +125,12 @@ class SalesAssistant:
         if not settings.OPENAI_API_KEY:
             return None
 
+        system_prompt = await self._build_system_prompt()
         history = list(self._history[chat_key])
         input_messages: list[dict] = [
             {
                 "role": "system",
-                "content": [{"type": "input_text", "text": self._system_prompt}],
+                "content": [{"type": "input_text", "text": system_prompt}],
             }
         ]
 

@@ -1,11 +1,12 @@
-import logging
+﻿import logging
 
 from aiogram import Router
 from aiogram.types import Message
 
 from bot.assistant_engine import SalesAssistant
-from bot.lead_draft_store import has_active_lead_draft
+from bot.lead_capture import process_lead_capture
 from core.config import settings
+from core.security import is_admin_message
 
 router = Router()
 assistant = SalesAssistant()
@@ -68,21 +69,21 @@ async def _handle_message(message: Message) -> None:
     if not chat:
         logger.warning("Assistant skip: no_chat")
         return
+    if is_admin_message(message):
+        logger.warning("Assistant skip: admin_identity chat_id=%s", chat.id)
+        return
+
     chat_type = _chat_type(message)
     if chat_type in {"group", "supergroup", "channel"}:
         logger.warning("Assistant skip: chat_type=%s chat_id=%s", chat_type, chat.id)
         return
-    if await has_active_lead_draft(chat.id):
-        logger.warning("Assistant skip: active_lead_draft chat_id=%s", chat.id)
-        return
 
     text = _extract_text(message)
-    if not text or text.startswith("/"):
+    if not text:
         logger.warning(
-            "Assistant skip: empty_or_command chat_id=%s chat_type=%s has_text=%s",
+            "Assistant skip: empty_text chat_id=%s chat_type=%s",
             chat.id,
             chat_type,
-            bool(text),
         )
         return
 
@@ -95,6 +96,26 @@ async def _handle_message(message: Message) -> None:
     result = await assistant.reply(chat_id=chat.id, user_text=text)
     await _reply_user(message, result.reply)
     logger.warning("Assistant replied: chat_id=%s reply_len=%s", chat.id, len(result.reply or ""))
+
+    try:
+        capture = await process_lead_capture(
+            chat_id=chat.id,
+            user_id=message.from_user.id if message.from_user else None,
+            username=message.from_user.username if message.from_user else None,
+            full_name=message.from_user.full_name if message.from_user else None,
+            user_text=text,
+            bot=message.bot,
+        )
+        if capture.sent:
+            await message.answer(
+                "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся.",
+                parse_mode=None,
+            )
+        elif capture.follow_up_question:
+            await message.answer(capture.follow_up_question, parse_mode=None)
+    except Exception:
+        logger.exception("Lead auto-capture failed for chat_id=%s", chat.id)
+
     if result.escalate:
         await _notify_managers(message, reason=result.reason)
 

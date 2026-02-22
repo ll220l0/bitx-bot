@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -10,8 +10,9 @@ from api.leads import router as leads_router
 from api.meta import router as meta_router
 from bot.assistant_engine import SalesAssistant
 from bot.dispatcher import build_dispatcher
-from bot.lead_draft_store import has_active_lead_draft
+from bot.lead_capture import process_lead_capture
 from core.config import settings
+from core.security import is_admin_payload
 from db.init import ensure_db_schema
 
 app = FastAPI(title="BitX API")
@@ -38,7 +39,7 @@ def get_bot() -> Bot:
     return bot
 
 
-def _extract_private_text_message(payload: dict) -> tuple[int, str] | None:
+def _extract_private_text_message(payload: dict) -> tuple[int, int | None, str | None, str | None, str] | None:
     message = payload.get("message") or {}
     chat = message.get("chat") or {}
     from_user = message.get("from") or {}
@@ -51,11 +52,28 @@ def _extract_private_text_message(payload: dict) -> tuple[int, str] | None:
     chat_id = chat.get("id")
     if not isinstance(chat_id, int):
         return None
+    if is_admin_payload(payload):
+        return None
+
+    user_id = from_user.get("id")
+    if not isinstance(user_id, int):
+        user_id = None
+    username = from_user.get("username")
+    if not isinstance(username, str):
+        username = None
+    first_name = from_user.get("first_name")
+    last_name = from_user.get("last_name")
+    parts: list[str] = []
+    if isinstance(first_name, str) and first_name.strip():
+        parts.append(first_name.strip())
+    if isinstance(last_name, str) and last_name.strip():
+        parts.append(last_name.strip())
+    full_name = " ".join(parts) if parts else None
 
     text = (message.get("text") or message.get("caption") or "").strip()
     if not text or text.startswith("/"):
         return None
-    return chat_id, text
+    return chat_id, user_id, username, full_name, text
 
 
 def _safe_reply_text(text: str) -> str:
@@ -102,12 +120,32 @@ async def telegram_webhook(
         # Reliable fallback for plain private messages in webhook mode.
         extracted = _extract_private_text_message(payload)
         if settings.ASSISTANT_ENABLED and extracted is not None:
-            chat_id, text = extracted
-            if not await has_active_lead_draft(chat_id):
-                result = await webhook_assistant.reply(chat_id=chat_id, user_text=text)
-                await tg_bot.send_message(chat_id, _safe_reply_text(result.reply), parse_mode=None)
-                logger.warning("Telegram direct assistant reply: chat_id=%s", chat_id)
-                return {"ok": True}
+            chat_id, user_id, username, full_name, text = extracted
+            result = await webhook_assistant.reply(chat_id=chat_id, user_text=text)
+            await tg_bot.send_message(chat_id, _safe_reply_text(result.reply), parse_mode=None)
+
+            try:
+                capture = await process_lead_capture(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    username=username,
+                    full_name=full_name,
+                    user_text=text,
+                    bot=tg_bot,
+                )
+                if capture.sent:
+                    await tg_bot.send_message(
+                        chat_id,
+                        "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся.",
+                        parse_mode=None,
+                    )
+                elif capture.follow_up_question:
+                    await tg_bot.send_message(chat_id, capture.follow_up_question, parse_mode=None)
+            except Exception:
+                logger.exception("Lead auto-capture failed in webhook for chat_id=%s", chat_id)
+
+            logger.warning("Telegram direct assistant reply: chat_id=%s", chat_id)
+            return {"ok": True}
 
         update = Update.model_validate(payload, context={"bot": tg_bot})
         logger.warning(

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     ASSISTANT_HISTORY_MESSAGES: int = 10
     ASSISTANT_MAX_TOKENS: int = 350
     SALES_MAX_DISCOUNT_PCT: int = 15
+    AUTO_LEAD_CAPTURE_ENABLED: bool = True
+    AUTO_LEAD_MIN_MESSAGES: int = 3
+    AUTO_LEAD_MIN_DETAILS_CHARS: int = 60
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
