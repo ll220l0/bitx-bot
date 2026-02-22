@@ -110,7 +110,12 @@ class LeadCaptureResult:
 def _clamp(value: str | None, limit: int) -> str | None:
     if value is None:
         return None
-    cleaned = value.strip()
+    cleaned = (
+        value.replace("\u3164", " ")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+        .strip()
+    )
     if not cleaned:
         return None
     return cleaned[:limit]
@@ -150,7 +155,12 @@ def _extract_name(text: str, full_name: str | None) -> str | None:
     match = NAME_RE.search(text)
     if match:
         return _clamp(match.group(1), 100)
-    return _clamp(full_name, 100)
+    fallback = _clamp(full_name, 100)
+    if not fallback:
+        return None
+    if not re.search(r"[A-Za-zА-Яа-яЁё0-9]", fallback):
+        return None
+    return fallback
 
 
 def _extract_company(text: str) -> str | None:
@@ -483,6 +493,23 @@ def _format_card(lead: Lead, profile: LeadProfile) -> str:
     return card[:3900]
 
 
+def _reset_profile_for_new_session(profile: LeadProfile) -> None:
+    # Start a fresh capture session while preserving Telegram identity fields.
+    profile.sent_to_managers = False
+    profile.name = None
+    profile.company = None
+    profile.service = None
+    profile.budget = None
+    profile.contact = None
+    profile.details = None
+    profile.message_count = 0
+
+
+def _reset_profile_after_handoff(profile: LeadProfile, lead_id: int) -> None:
+    _reset_profile_for_new_session(profile)
+    profile.sent_lead_id = lead_id
+
+
 async def _notify_managers(card_text: str, bot: Bot | None) -> None:
     chat_ids = settings.notification_chat_ids()
     if not chat_ids:
@@ -528,6 +555,7 @@ async def process_lead_capture(
 
     lead: Lead | None = None
     profile_snapshot: LeadProfile | None = None
+    card_text: str | None = None
 
     async with async_session() as session:
         result = await session.execute(select(LeadProfile).where(LeadProfile.chat_id == chat_id))
@@ -548,6 +576,14 @@ async def process_lead_capture(
             )
             session.add(profile)
         else:
+            if profile.sent_to_managers:
+                logger.info(
+                    "Reopening handed-off profile: chat_id=%s sent_lead_id=%s",
+                    chat_id,
+                    profile.sent_lead_id,
+                )
+                _reset_profile_for_new_session(profile)
+
             profile.tg_user_id = user_id or profile.tg_user_id
             profile.tg_username = username or profile.tg_username
             profile.message_count = int(profile.message_count or 0) + 1
@@ -611,8 +647,8 @@ async def process_lead_capture(
         session.add(lead)
         await session.flush()
 
-        profile.sent_to_managers = True
-        profile.sent_lead_id = lead.id
+        card_text = _format_card(lead, profile)
+        _reset_profile_after_handoff(profile, lead.id)
         profile_snapshot = profile
 
         await session.commit()
@@ -622,7 +658,7 @@ async def process_lead_capture(
         return LeadCaptureResult()
 
     try:
-        await _notify_managers(_format_card(lead, profile_snapshot), bot=bot)
+        await _notify_managers(card_text or _format_card(lead, profile_snapshot), bot=bot)
     except Exception:
         logger.exception("Failed to notify managers for lead_id=%s", lead.id)
 
