@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -18,6 +18,7 @@ ESCALATION_KEYWORDS = {
     "жалоба",
     "договор",
     "счет",
+    "счёт",
     "оплата",
     "предоплата",
     "срочно",
@@ -69,7 +70,8 @@ class SalesAssistant:
             "2) Не обещай точные сроки и финальный бюджет без уточнений.\n"
             "3) Не придумывай кейсы и гарантии, которых не было озвучено.\n"
             "4) Если запрос про договор/оплату/юридические условия — предложи подключить менеджера.\n"
-            "5) Всегда сохраняй вежливый и уверенный тон.\n"
+            "5) Задавай максимум один уточняющий вопрос за сообщение, без давления.\n"
+            "6) Если данных мало, мягко предложи следующий шаг.\n"
             "Контакты: Telegram @bitx_kg, Instagram @bitx_kg, Email bitxkg@gmail.com."
         )
 
@@ -79,6 +81,18 @@ class SalesAssistant:
         if not custom:
             return base
         return f"{base}\n\nДополнительный сценарий от администратора:\n{custom}"
+
+    def _trim_history(self, chat_key: str) -> None:
+        max_chars = max(settings.ASSISTANT_MAX_HISTORY_CHARS, 500)
+        history = self._history[chat_key]
+        total = sum(len(item.get("text", "")) for item in history)
+        while history and total > max_chars:
+            dropped = history.popleft()
+            total -= len(dropped.get("text", ""))
+
+    def _append_history(self, chat_key: str, role: str, text: str) -> None:
+        self._history[chat_key].append({"role": role, "text": text})
+        self._trim_history(chat_key)
 
     def _enforce_discount_rule(self, text: str) -> AssistantResult | None:
         lowered = text.lower()
@@ -117,7 +131,7 @@ class SalesAssistant:
         return AssistantResult(
             reply=(
                 "Могу помочь с консультацией и предварительной оценкой. "
-                "Расскажите, что нужно сделать, желаемые сроки и ориентир по бюджету."
+                "Коротко опишите задачу, желаемые сроки и ориентир по бюджету."
             )
         )
 
@@ -160,7 +174,7 @@ class SalesAssistant:
             "model": settings.OPENAI_MODEL,
             "input": input_messages,
             "max_output_tokens": settings.ASSISTANT_MAX_TOKENS,
-            "temperature": 0.4,
+            "temperature": 0.35,
         }
 
         try:
@@ -207,15 +221,15 @@ class SalesAssistant:
 
         forced = self._enforce_discount_rule(clean_text)
         if forced:
-            self._history[chat_key].append({"role": "user", "text": clean_text})
-            self._history[chat_key].append({"role": "assistant", "text": forced.reply})
+            self._append_history(chat_key, "user", clean_text)
+            self._append_history(chat_key, "assistant", forced.reply)
             return forced
 
         llm_reply = await self._ask_llm(chat_key=chat_key, user_text=clean_text)
         if not llm_reply:
             fallback = self._fallback_reply(clean_text)
-            self._history[chat_key].append({"role": "user", "text": clean_text})
-            self._history[chat_key].append({"role": "assistant", "text": fallback.reply})
+            self._append_history(chat_key, "user", clean_text)
+            self._append_history(chat_key, "assistant", fallback.reply)
             return fallback
 
         escalate = self._needs_escalation(clean_text)
@@ -226,6 +240,6 @@ class SalesAssistant:
                 "Чтобы согласовать коммерческие условия, подключаю менеджера."
             )
 
-        self._history[chat_key].append({"role": "user", "text": clean_text})
-        self._history[chat_key].append({"role": "assistant", "text": llm_reply})
+        self._append_history(chat_key, "user", clean_text)
+        self._append_history(chat_key, "assistant", llm_reply)
         return AssistantResult(reply=llm_reply, escalate=escalate, reason=reason)

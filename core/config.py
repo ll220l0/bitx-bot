@@ -21,11 +21,15 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     ASSISTANT_HISTORY_MESSAGES: int = 10
+    ASSISTANT_MAX_HISTORY_CHARS: int = 6000
     ASSISTANT_MAX_TOKENS: int = 350
     SALES_MAX_DISCOUNT_PCT: int = 15
     AUTO_LEAD_CAPTURE_ENABLED: bool = True
     AUTO_LEAD_MIN_MESSAGES: int = 3
     AUTO_LEAD_MIN_DETAILS_CHARS: int = 60
+    LEAD_FOLLOW_UP_AFTER_MESSAGES: int = 3
+    LEAD_FOLLOW_UP_EVERY_N_MESSAGES: int = 3
+    LEAD_FOLLOW_UP_DETAILS_AFTER_MESSAGES: int = 7
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

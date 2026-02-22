@@ -56,6 +56,16 @@ QUESTION_BY_FIELD: dict[str, str] = {
     "details": "Если удобно, добавьте ключевые требования к результату.",
 }
 FOLLOW_UP_PRIORITY: tuple[str, ...] = ("name", "service", "contact", "company", "timeline", "budget", "details")
+LIGHT_ACK_MESSAGES = {
+    "ок",
+    "окей",
+    "понял",
+    "поняла",
+    "да",
+    "нет",
+    "ясно",
+    "хорошо",
+}
 
 
 @dataclass(slots=True)
@@ -195,22 +205,23 @@ def _detect_missing_fields(profile: LeadProfile) -> list[str]:
     items = _detail_items(profile.details)
     timeline = _guess_timeline(items)
     missing: list[str] = []
+    turns = int(profile.message_count or 0)
 
     if not profile.name:
         missing.append("name")
-    if not profile.company:
+    if not profile.company and turns >= 5:
         missing.append("company")
     if not profile.service:
         missing.append("service")
-    if not timeline:
+    if not timeline and not profile.budget:
         missing.append("timeline")
-    if not profile.budget:
+    if not profile.budget and timeline and turns >= 5:
         missing.append("budget")
     if not profile.contact:
         missing.append("contact")
 
     details_len = len((profile.details or "").strip())
-    if details_len < max(settings.AUTO_LEAD_MIN_DETAILS_CHARS, 20):
+    if details_len < max(settings.AUTO_LEAD_MIN_DETAILS_CHARS, 20) and turns >= settings.LEAD_FOLLOW_UP_DETAILS_AFTER_MESSAGES:
         missing.append("details")
 
     return missing
@@ -225,18 +236,35 @@ def _build_follow_up_question(missing_fields: list[str]) -> str | None:
     return QUESTION_BY_FIELD.get(missing_fields[0])
 
 
-def _should_ask_follow_up(profile: LeadProfile, missing_fields: list[str]) -> bool:
+def _is_light_ack_message(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    if not normalized:
+        return True
+    if normalized in LIGHT_ACK_MESSAGES:
+        return True
+    if len(normalized) <= 3:
+        return True
+    return False
+
+
+def _should_ask_follow_up(profile: LeadProfile, missing_fields: list[str], user_text: str) -> bool:
     if not missing_fields:
         return False
 
-    # Ask gradually, not after every user message.
-    if int(profile.message_count or 0) < 2:
+    if _is_light_ack_message(user_text):
         return False
-    if int(profile.message_count or 0) % 2 != 0:
+
+    # Ask gradually, not after every user message.
+    turns = int(profile.message_count or 0)
+    if turns < max(settings.LEAD_FOLLOW_UP_AFTER_MESSAGES, 2):
+        return False
+
+    step = max(settings.LEAD_FOLLOW_UP_EVERY_N_MESSAGES, 2)
+    if turns % step != 0:
         return False
 
     # If only details are missing, ask later to avoid pressure.
-    if missing_fields == ["details"] and int(profile.message_count or 0) < 6:
+    if missing_fields == ["details"] and turns < max(settings.LEAD_FOLLOW_UP_DETAILS_AFTER_MESSAGES, 6):
         return False
 
     return True
@@ -245,9 +273,17 @@ def _should_ask_follow_up(profile: LeadProfile, missing_fields: list[str]) -> bo
 def _is_profile_ready(profile: LeadProfile) -> bool:
     if profile.sent_to_managers:
         return False
-    if profile.message_count < max(settings.AUTO_LEAD_MIN_MESSAGES, 1):
+    turns = int(profile.message_count or 0)
+    if turns < max(settings.AUTO_LEAD_MIN_MESSAGES, 1):
         return False
-    return not _detect_missing_fields(profile)
+
+    items = _detail_items(profile.details)
+    timeline = _guess_timeline(items)
+    details_len = len((profile.details or "").strip())
+
+    has_identity = bool(profile.name and profile.service and profile.contact)
+    has_commercial_hint = bool(profile.budget or timeline or details_len >= 40)
+    return has_identity and has_commercial_hint
 
 
 def _build_goal(service: str, tags: list[str]) -> str:
@@ -401,11 +437,7 @@ async def process_lead_capture(
                 profile.contact = _extract_contact(text, username)
 
         missing_fields = _detect_missing_fields(profile)
-        follow_up_question = (
-            _build_follow_up_question(missing_fields)
-            if _should_ask_follow_up(profile, missing_fields)
-            else None
-        )
+        follow_up_question = _build_follow_up_question(missing_fields) if _should_ask_follow_up(profile, missing_fields, text) else None
 
         if not _is_profile_ready(profile):
             await session.commit()
