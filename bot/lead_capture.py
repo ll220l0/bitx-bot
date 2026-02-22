@@ -66,6 +66,36 @@ LIGHT_ACK_MESSAGES = {
     "ясно",
     "хорошо",
 }
+DETAIL_NOISE_MESSAGES = {
+    "привет",
+    "здравствуйте",
+    "добрый день",
+    "добрый вечер",
+    "спасибо",
+    "благодарю",
+}
+INSIGHT_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Ожидает интеграции с внешними сервисами и системами учета.",
+        ("интеграц", "api", "crm", "amo", "битрикс", "1с", "google"),
+    ),
+    (
+        "Приоритет на автоматизацию и снижение ручной нагрузки.",
+        ("автоматизац", "оптимизац", "ручн", "workflow"),
+    ),
+    (
+        "Фокус на росте заявок и улучшении продаж.",
+        ("лид", "заяв", "продаж", "воронк", "конверс"),
+    ),
+    (
+        "Важна клиентская поддержка и качество коммуникации.",
+        ("поддержк", "чат", "faq", "консультац"),
+    ),
+    (
+        "Запрос на быстрый запуск пилота или MVP.",
+        ("mvp", "прототип", "пилот", "быстр", "сроч"),
+    ),
+)
 
 
 @dataclass(slots=True)
@@ -174,13 +204,24 @@ def _detail_items(details: str | None) -> list[str]:
         return []
 
     items: list[str] = []
+    seen: set[str] = set()
     for raw in details.splitlines():
         line = raw.strip()
         if not line:
             continue
         if line.startswith("-"):
             line = line[1:].strip()
-        if line and line not in items:
+        normalized = " ".join(line.lower().split())
+        if not normalized:
+            continue
+        if normalized in LIGHT_ACK_MESSAGES or normalized in DETAIL_NOISE_MESSAGES:
+            continue
+        if len(normalized) <= 3:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if line:
             items.append(line)
     return items
 
@@ -285,12 +326,39 @@ def _is_profile_ready(profile: LeadProfile) -> bool:
         return False
 
     items = _detail_items(profile.details)
+    tags = _derive_tags(items)
     timeline = _guess_timeline(items)
     details_len = len((profile.details or "").strip())
 
     has_identity = bool(profile.name and profile.service and profile.contact)
-    has_commercial_hint = bool(profile.budget or timeline or details_len >= 40)
-    return has_identity and has_commercial_hint
+    if not has_identity:
+        return False
+
+    context_score = 0
+    if profile.company:
+        context_score += 2
+    if profile.budget:
+        context_score += 2
+    if timeline:
+        context_score += 1
+    if len(items) >= 3:
+        context_score += 2
+    elif len(items) >= 1:
+        context_score += 1
+    if details_len >= max(settings.AUTO_LEAD_MIN_DETAILS_CHARS, 60):
+        context_score += 1
+    if turns >= 5:
+        context_score += 1
+    if tags:
+        context_score += 1
+
+    if context_score < max(settings.AUTO_LEAD_MIN_CONTEXT_SCORE, 3):
+        return False
+
+    missing = _detect_missing_fields(profile)
+    if "company" in missing and "budget" in missing and "timeline" in missing:
+        return False
+    return True
 
 
 def _build_goal(service: str, tags: list[str]) -> str:
@@ -310,6 +378,37 @@ def _build_scope(service: str, tags: list[str]) -> str:
     return f"{service}. Приоритетные блоки: {', '.join(tags)}."
 
 
+def _derive_insights(items: list[str]) -> list[str]:
+    if not items:
+        return []
+    joined = " ".join(items).lower()
+    insights: list[str] = []
+    for summary, keys in INSIGHT_RULES:
+        if any(key in joined for key in keys):
+            insights.append(summary)
+    if not insights:
+        insights.append("Клиент ожидает решение под свою задачу с понятным планом запуска.")
+    return insights[:5]
+
+
+def _manager_follow_ups(profile: LeadProfile, timeline: str | None) -> list[str]:
+    questions: list[str] = []
+    if not profile.company:
+        questions.append("Уточнить компанию/нишу и тип клиента.")
+    if not timeline:
+        questions.append("Подтвердить желаемые сроки запуска и приоритет этапов.")
+    if not profile.budget:
+        questions.append("Согласовать бюджетный диапазон и формат оплаты.")
+
+    details_len = len((profile.details or "").strip())
+    if details_len < max(settings.AUTO_LEAD_MIN_DETAILS_CHARS, 20):
+        questions.append("Уточнить ключевые требования к результату и критерии успеха.")
+
+    if not questions:
+        questions.append("Проверить финальный объем работ и перейти к коммерческому предложению.")
+    return questions[:4]
+
+
 def _build_internal_summary(
     *,
     name: str,
@@ -319,6 +418,8 @@ def _build_internal_summary(
     contact: str,
     timeline: str | None,
     tags: list[str],
+    insights: list[str],
+    follow_ups: list[str],
 ) -> str:
     lines = [
         f"Клиент: {name}",
@@ -330,6 +431,10 @@ def _build_internal_summary(
     ]
     if tags:
         lines.append(f"Приоритеты: {', '.join(tags)}")
+    if insights:
+        lines.append(f"Сигналы: {'; '.join(insights)}")
+    if follow_ups:
+        lines.append(f"Менеджеру уточнить: {'; '.join(follow_ups)}")
     return "\n".join(lines)[:1200]
 
 
@@ -337,11 +442,15 @@ def _format_card(lead: Lead, profile: LeadProfile) -> str:
     items = _detail_items(profile.details)
     tags = _derive_tags(items)
     timeline = _guess_timeline(items)
+    insights = _derive_insights(items)
+    follow_ups = _manager_follow_ups(profile, timeline)
 
     goal = _build_goal(lead.service, tags)
     scope = _build_scope(lead.service, tags)
     context_items = tags or ["Требуется уточнение функционального объема"]
     context_text = "• " + "\n• ".join(escape(item) for item in context_items)
+    insights_text = "• " + "\n• ".join(escape(item) for item in insights) if insights else "• Нет выраженных сигналов"
+    follow_up_text = "• " + "\n• ".join(escape(item) for item in follow_ups)
 
     card = (
         f"🧾 <b>Новая карточка клиента</b> (#{lead.id})\n\n"
@@ -356,6 +465,8 @@ def _format_card(lead: Lead, profile: LeadProfile) -> str:
         f"<b>Бюджет</b>: {escape(lead.budget)}\n"
         f"<b>Сроки</b>: {escape(timeline or 'Требуют уточнения')}\n\n"
         f"<b>Важные акценты</b>\n{context_text}\n\n"
+        f"<b>Сводка от ассистента</b>\n{insights_text}\n\n"
+        f"<b>Что уточнить менеджеру</b>\n{follow_up_text}\n\n"
         "<b>Следующий шаг для менеджера</b>\n"
         "Связаться с клиентом, подтвердить объем, сроки и подготовить коммерческое предложение."
     )
@@ -459,6 +570,8 @@ async def process_lead_capture(
         items = _detail_items(profile.details)
         tags = _derive_tags(items)
         timeline = _guess_timeline(items)
+        insights = _derive_insights(items)
+        follow_ups = _manager_follow_ups(profile, timeline)
 
         lead = Lead(
             source="telegram_ai",
@@ -475,6 +588,8 @@ async def process_lead_capture(
                 contact=_clamp(profile.contact or f"chat_id:{chat_id}", 100) or f"chat_id:{chat_id}",
                 timeline=timeline,
                 tags=tags,
+                insights=insights,
+                follow_ups=follow_ups,
             ),
         )
         session.add(lead)
