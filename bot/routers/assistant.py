@@ -94,8 +94,7 @@ async def _handle_message(message: Message) -> None:
         len(text),
     )
     result = await assistant.reply(chat_id=chat.id, user_text=text)
-    await _reply_user(message, result.reply)
-    logger.warning("Assistant replied: chat_id=%s reply_len=%s", chat.id, len(result.reply or ""))
+    extra_note = ""
 
     try:
         capture = await process_lead_capture(
@@ -107,14 +106,18 @@ async def _handle_message(message: Message) -> None:
             bot=message.bot,
         )
         if capture.sent:
-            await message.answer(
-                "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся.",
-                parse_mode=None,
-            )
+            extra_note = "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся."
         elif capture.follow_up_question:
-            await message.answer(capture.follow_up_question, parse_mode=None)
+            extra_note = capture.follow_up_question
     except Exception:
         logger.exception("Lead auto-capture failed for chat_id=%s", chat.id)
+
+    final_reply = result.reply
+    if extra_note:
+        final_reply = f"{final_reply}\n\n{extra_note}"
+
+    await _reply_user(message, final_reply)
+    logger.warning("Assistant replied: chat_id=%s reply_len=%s", chat.id, len(final_reply or ""))
 
     if result.escalate:
         await _notify_managers(message, reason=result.reason)

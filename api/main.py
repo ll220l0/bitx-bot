@@ -122,7 +122,7 @@ async def telegram_webhook(
         if settings.ASSISTANT_ENABLED and extracted is not None:
             chat_id, user_id, username, full_name, text = extracted
             result = await webhook_assistant.reply(chat_id=chat_id, user_text=text)
-            await tg_bot.send_message(chat_id, _safe_reply_text(result.reply), parse_mode=None)
+            extra_note = ""
 
             try:
                 capture = await process_lead_capture(
@@ -134,15 +134,16 @@ async def telegram_webhook(
                     bot=tg_bot,
                 )
                 if capture.sent:
-                    await tg_bot.send_message(
-                        chat_id,
-                        "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся.",
-                        parse_mode=None,
-                    )
+                    extra_note = "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся."
                 elif capture.follow_up_question:
-                    await tg_bot.send_message(chat_id, capture.follow_up_question, parse_mode=None)
+                    extra_note = capture.follow_up_question
             except Exception:
                 logger.exception("Lead auto-capture failed in webhook for chat_id=%s", chat_id)
+
+            reply_text = _safe_reply_text(result.reply)
+            if extra_note:
+                reply_text = f"{reply_text}\n\n{extra_note}"[:3500]
+            await tg_bot.send_message(chat_id, reply_text, parse_mode=None)
 
             logger.warning("Telegram direct assistant reply: chat_id=%s", chat_id)
             return {"ok": True}
