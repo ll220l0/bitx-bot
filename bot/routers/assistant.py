@@ -12,6 +12,16 @@ router = Router()
 assistant = SalesAssistant()
 logger = logging.getLogger(__name__)
 
+FIELD_HINTS: dict[str, tuple[str, ...]] = {
+    "name": ("имя", "как вас зовут", "представ"),
+    "company": ("компан", "ниша", "сфера"),
+    "service": ("услуг", "задач", "нужно сделать", "интересует"),
+    "timeline": ("срок", "дедлайн", "когда"),
+    "budget": ("бюджет", "ориентир", "стоимость"),
+    "contact": ("контакт", "телефон", "email", "почт", "username", "@"),
+    "details": ("детал", "требован", "уточн", "подроб"),
+}
+
 
 def _extract_text(message: Message) -> str:
     return (message.text or message.caption or "").strip()
@@ -27,6 +37,16 @@ def _safe_reply_text(text: str) -> str:
     if not clean:
         return "Могу помочь с консультацией. Опиши задачу в 1-2 предложениях."
     return clean[:3500]
+
+
+def _assistant_already_asked(reply_text: str, field: str | None) -> bool:
+    if not field:
+        return False
+    hints = FIELD_HINTS.get(field)
+    if not hints:
+        return False
+    lowered = (reply_text or "").lower()
+    return any(token in lowered for token in hints)
 
 
 async def _reply_user(message: Message, text: str) -> None:
@@ -107,7 +127,7 @@ async def _handle_message(message: Message) -> None:
         )
         if capture.sent:
             extra_note = "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся."
-        elif capture.follow_up_question:
+        elif capture.follow_up_question and not _assistant_already_asked(result.reply, capture.follow_up_field):
             extra_note = capture.follow_up_question
     except Exception:
         logger.exception("Lead auto-capture failed for chat_id=%s", chat.id)

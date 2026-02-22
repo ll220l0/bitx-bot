@@ -74,6 +74,7 @@ class LeadCaptureResult:
     lead_id: int | None = None
     missing_fields: list[str] = field(default_factory=list)
     follow_up_question: str | None = None
+    follow_up_field: str | None = None
 
 
 def _clamp(value: str | None, limit: int) -> str | None:
@@ -227,13 +228,19 @@ def _detect_missing_fields(profile: LeadProfile) -> list[str]:
     return missing
 
 
-def _build_follow_up_question(missing_fields: list[str]) -> str | None:
+def _pick_follow_up_field(missing_fields: list[str]) -> str | None:
     if not missing_fields:
         return None
     for key in FOLLOW_UP_PRIORITY:
         if key in missing_fields:
-            return QUESTION_BY_FIELD.get(key)
-    return QUESTION_BY_FIELD.get(missing_fields[0])
+            return key
+    return missing_fields[0]
+
+
+def _build_follow_up_question(field: str | None) -> str | None:
+    if not field:
+        return None
+    return QUESTION_BY_FIELD.get(field)
 
 
 def _is_light_ack_message(text: str) -> bool:
@@ -437,7 +444,8 @@ async def process_lead_capture(
                 profile.contact = _extract_contact(text, username)
 
         missing_fields = _detect_missing_fields(profile)
-        follow_up_question = _build_follow_up_question(missing_fields) if _should_ask_follow_up(profile, missing_fields, text) else None
+        follow_up_field = _pick_follow_up_field(missing_fields) if _should_ask_follow_up(profile, missing_fields, text) else None
+        follow_up_question = _build_follow_up_question(follow_up_field)
 
         if not _is_profile_ready(profile):
             await session.commit()
@@ -445,6 +453,7 @@ async def process_lead_capture(
                 sent=False,
                 missing_fields=missing_fields,
                 follow_up_question=follow_up_question,
+                follow_up_field=follow_up_field,
             )
 
         items = _detail_items(profile.details)

@@ -25,6 +25,16 @@ bot: Bot | None = None
 dp = build_dispatcher()
 webhook_assistant = SalesAssistant()
 
+FIELD_HINTS: dict[str, tuple[str, ...]] = {
+    "name": ("имя", "как вас зовут", "представ"),
+    "company": ("компан", "ниша", "сфера"),
+    "service": ("услуг", "задач", "нужно сделать", "интересует"),
+    "timeline": ("срок", "дедлайн", "когда"),
+    "budget": ("бюджет", "ориентир", "стоимость"),
+    "contact": ("контакт", "телефон", "email", "почт", "username", "@"),
+    "details": ("детал", "требован", "уточн", "подроб"),
+}
+
 
 def get_bot() -> Bot:
     global bot
@@ -83,6 +93,16 @@ def _safe_reply_text(text: str) -> str:
     return value[:3500]
 
 
+def _assistant_already_asked(reply_text: str, field: str | None) -> bool:
+    if not field:
+        return False
+    hints = FIELD_HINTS.get(field)
+    if not hints:
+        return False
+    lowered = (reply_text or "").lower()
+    return any(token in lowered for token in hints)
+
+
 @app.get("/")
 async def root():
     return {"status": "ok"}
@@ -135,7 +155,7 @@ async def telegram_webhook(
                 )
                 if capture.sent:
                     extra_note = "Спасибо, собрал вашу заявку и передал менеджеру. Скоро с вами свяжемся."
-                elif capture.follow_up_question:
+                elif capture.follow_up_question and not _assistant_already_asked(result.reply, capture.follow_up_field):
                     extra_note = capture.follow_up_question
             except Exception:
                 logger.exception("Lead auto-capture failed in webhook for chat_id=%s", chat_id)
